@@ -104,9 +104,16 @@ class SDS011:
         self._send_command(_CMD_WAKE_STATE, 1, active)
         return self._get_response()
 
+
     def _calc_payload_checksum(self, payload):
         """Return first 8 bits of the sum of the data bytes."""
         return sum(payload) & 255
+
+
+    def _verify_packet(self, packet):
+        """Verify the checksum of a packet."""
+        our_checksum = self._calc_payload_checksum(packet[2:8])
+        return our_checksum == packet[8]
 
 
     def _build_message(self, payload):
@@ -123,9 +130,51 @@ class SDS011:
         return payload
 
 
-    def _get_response(self):
+    def _get_response(self, interpret=True):
         """Read a 10-byte response from the device."""
-        return self._sd.read(10)
+        response = self._sd.read(10)
+        if interpret:
+            response = self.interpret(response)
+        return response
+
+
+    def _interpret_property(self, bytestring):
+        """interpret() sub-function: property replies.
+
+        Translate a response packet from property get/set into
+        a human-readable dictionary.
+        """
+        property_switch = {
+            0x02: 'report mode',
+            0x05: 'device id',
+            0x06: 'wake state',
+            0x07: 'firmware version',
+            0x08: 'work period'
+        }
+        reply = {'type': property_switch[bytestring[2]]}
+        if reply['type'] == 'firmware version':
+            year = 2000 + bytestring[3]
+            month = bytestring[4]
+            day = bytestring[5]
+            reply['version'] = f'{year}-{month}-{day}'
+        else:
+            reply['set'] = bytestring[3]
+            reply['setting'] = bytestring[4]
+        return reply
+
+
+    def _interpret_sample(self, bytestring):
+        """interpret() sub-function: sample replies.
+
+        Translate a response packet from a sample request into
+        a human-readable dictionary.
+        """
+        reply = {
+            'type': 'particulate data',
+            'pm_2.5': int.from_bytes(bytestring[2:4], 'little')/10,
+            'pm_10.0': int.from_bytes(bytestring[4:6], 'little')/10,
+        }
+        return reply
 
 
     def _send_command(self, command, mode, setting):
@@ -146,6 +195,18 @@ class SDS011:
     def clear(self):
         """Clear the device buffer."""
         self._sd.reset_input_buffer()
+
+
+    def interpret(self, bytestring):
+        """Translate a raw device response into a dictionary."""
+        switch = {
+            0xc5: lambda : self._interpret_property(bytestring),
+            0xc0: lambda : self._interpret_sample(bytestring),
+        }
+        reply = switch[bytestring[1]]()
+        reply['id'] = bytestring[6:8]
+        reply['checksum'] = self._verify_packet(bytestring)
+        return reply
 
 
     def open(self, port):

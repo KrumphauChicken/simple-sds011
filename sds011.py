@@ -11,10 +11,12 @@ _CMD_WAKE_STATE = 6
 _CMD_FIRMWARE = 7
 _CMD_WORK_PERIOD = 8
 
-MODE_ACTIVE = 0
-MODE_QUERY = 1
-STATE_SLEEP = 0
-STATE_WORK = 1
+MODE_CONTINUOUS = 0
+MODE_PASSIVE = 1
+PERIOD_NONE = 0
+PERIOD_FIVE = 5
+PERIOD_TEN = 10
+PERIOD_MAX = 30
 
 _BAUDRATE = 9600
 _BYTESIZE = serial.EIGHTBITS
@@ -26,6 +28,17 @@ class SDS011:
     def __init__(self, port=None, device_id=b'\xff\xff', read_timeout=1):
         self._sd = serial.Serial(port, timeout=read_timeout)
         #self.device_id = device_id or b'\xff\xff'
+
+
+    @property
+    def awake(self):
+        """Whether the device fan and laser are powered (1) or not (0).
+
+        Use this to sleep the device, preserving the life of
+        the laser diode and fan.
+        """
+        self._send_command(_CMD_WAKE_STATE, 0, 0)
+        return self._get_response()
 
 
     @property
@@ -52,17 +65,21 @@ class SDS011:
 
     @property
     def mode(self):
-        """Active (0) or query (1) report mode.
+        """Continuous (0) or passive (1) report mode.
 
-        When the report mode is active, the device sends sample data
-        once every work period (once per second in continuous sampling).
-        When the report mode is query, the device sends sample data
+        When the report mode is 'continuous', the device sends sample
+        data once every work period (or once per second with no period).
+        When the report mode is 'passive', the device sends sample data
         only when queried.
 
-        NOTE: Only use 'query' mode for the time being. This draft does
-        not contain functions to accommodate the continuous responses
-        in the 'active' mode. Use the clear() function to clear the
-        underlying input buffer if the device was left in 'active' mode.
+        NOTE: Only use 'passive' mode for the time being. This draft
+        does does not handle the nonstop input from 'continuous' mode.
+        Use the clear() function to clear the underlying input buffer
+        if the device was left in 'continuous' mode.
+
+        NOTE: Continuous and passive sampling are called 'active' and
+        'query' in the spec sheet, but the 'active' term can be confused
+        with an active device versus a sleeping device.
         """
         self._send_command(_CMD_REPORT_MODE, 0, 0)
         return self._get_response()
@@ -80,10 +97,9 @@ class SDS011:
         return self._get_response()
 
 
-    @property
-    def state(self):
-        """Whether the sensor is sleeping (0) or working (1)."""
-        self._send_command(_CMD_WAKE_STATE, 0, 0)
+    @awake.setter
+    def awake(self, value: bool):
+        self._send_command(_CMD_WAKE_STATE, 1, value)
         return self._get_response()
 
 
@@ -96,12 +112,6 @@ class SDS011:
     @period.setter
     def period(self, minutes: int):
         self._send_command(_CMD_WORK_PERIOD, 1, minutes)
-        return self._get_response()
-
-
-    @state.setter
-    def state(self, active: bool):
-        self._send_command(_CMD_WAKE_STATE, 1, active)
         return self._get_response()
 
 
@@ -122,9 +132,9 @@ class SDS011:
         return _MSG_HEAD + _MSG_ID + payload + checksum_byte + _MSG_TAIL
 
 
-    def _build_payload(self, command, mode, setting):
+    def _build_payload(self, command, write: bool, value, int):
         """Given the command and options, return the packet payload."""
-        payload = bytearray([command, mode, setting])
+        payload = bytearray([command, write, value])
         payload += bytearray(10)
         payload += self.device_id
         return payload
@@ -145,21 +155,20 @@ class SDS011:
         a human-readable dictionary.
         """
         property_switch = {
-            0x02: 'report mode',
-            0x05: 'device id',
-            0x06: 'wake state',
-            0x07: 'firmware version',
-            0x08: 'work period'
+            0x02: 'mode',
+            0x05: 'id',
+            0x06: 'awake',
+            0x07: 'firmware',
+            0x08: 'period'
         }
         reply = {'type': property_switch[bytestring[2]]}
-        if reply['type'] == 'firmware version':
+        if reply['type'] == 'firmware':
             year = 2000 + bytestring[3]
             month = bytestring[4]
             day = bytestring[5]
-            reply['version'] = f'{year}-{month}-{day}'
+            reply['value'] = f'{year}-{month}-{day}'
         else:
-            reply['set'] = bytestring[3]
-            reply['setting'] = bytestring[4]
+            reply['value'] = bytestring[4]
         return reply
 
 
@@ -170,21 +179,23 @@ class SDS011:
         a human-readable dictionary.
         """
         reply = {
-            'type': 'particulate data',
-            'pm_2.5': int.from_bytes(bytestring[2:4], 'little')/10,
-            'pm_10.0': int.from_bytes(bytestring[4:6], 'little')/10,
+            'type': 'sample',
+            'value': {
+                'pm2.5': int.from_bytes(bytestring[2:4], 'little')/10,
+                'pm10.0': int.from_bytes(bytestring[4:6], 'little')/10
+            }
         }
         return reply
 
 
-    def _send_command(self, command, mode, setting):
+    def _send_command(self, command, write: bool, value: int):
         """Send a command to the device.
 
         Encapsulates a command, command mode, and command argument in
         a checksummed packet, and sends this to the device.
         Returns return code from device, but not device reply.
         """
-        payload = bytearray([command, mode, setting])
+        payload = bytearray([command, write, value])
         payload += bytearray(10)
         payload += self.device_id
         checksum = bytes([sum(payload) & 255])

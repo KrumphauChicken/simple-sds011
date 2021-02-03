@@ -1,3 +1,7 @@
+"""simple-sds011 is a minimal python library for managing
+Nova SDS011 particulate matter sensors.
+"""
+
 import serial
 
 _MSG_HEAD = b'\xaa'  # 0xAA
@@ -31,7 +35,7 @@ class SDS011:
 
 
     @property
-    def awake(self):
+    def active(self):
         """Whether the device fan and laser are powered (1) or not (0).
 
         Use this to sleep the device, preserving the life of
@@ -97,8 +101,8 @@ class SDS011:
         return self._get_response()
 
 
-    @awake.setter
-    def awake(self, value: bool):
+    @active.setter
+    def active(self, value: bool):
         self._send_command(_CMD_WAKE_STATE, 1, value)
         return self._get_response()
 
@@ -157,7 +161,7 @@ class SDS011:
         property_switch = {
             0x02: 'mode',
             0x05: 'id',
-            0x06: 'awake',
+            0x06: 'active',
             0x07: 'firmware',
             0x08: 'period'
         }

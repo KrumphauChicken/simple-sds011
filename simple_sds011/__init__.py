@@ -126,8 +126,7 @@ class SDS011:
 
     def _verify_packet(self, packet):
         """Verify the checksum of a packet."""
-        our_checksum = self._calc_payload_checksum(packet[2:8])
-        return our_checksum == packet[8]
+        return packet[8] == self._calc_payload_checksum(packet[2:8])
 
 
     def _build_message(self, payload):
@@ -220,7 +219,7 @@ class SDS011:
         }
         reply = switch[bytestring[1]]()
         reply['id'] = bytestring[6:8]
-        reply['checksum'] = self._verify_packet(bytestring)
+        reply['checksum'] = bytestring[8] == sum(bytestring[2:8]) & 255
         return reply
 
 

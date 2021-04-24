@@ -132,11 +132,11 @@ class SDS011:
 
     def _build_message(self, payload):
         """Given the payload, return the complete packet."""
-        checksum_byte = bytes([self.__calc_payload_checksum(payload)])
+        checksum_byte = bytes([self._calc_payload_checksum(payload)])
         return _MSG_HEAD + _MSG_ID + payload + checksum_byte + _MSG_TAIL
 
 
-    def _build_payload(self, command, write: bool, value, int):
+    def _build_payload(self, command, write: bool, value: int):
         """Given the command and options, return the packet payload."""
         payload = bytearray([command, write, value])
         payload += bytearray(10)

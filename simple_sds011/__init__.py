@@ -164,15 +164,15 @@ class SDS011:
             0x07: 'firmware',
             0x08: 'period'
         }
-        reply = {'type': property_switch[bytestring[2]]}
-        if reply['type'] == 'firmware':
+        reply_part = {'type': property_switch[bytestring[2]]}
+        if reply_part['type'] == 'firmware':
             year = 2000 + bytestring[3]
             month = bytestring[4]
             day = bytestring[5]
-            reply['value'] = f'{year}-{month}-{day}'
+            reply_part['value'] = f'{year}-{month}-{day}'
         else:
-            reply['value'] = bytestring[4]
-        return reply
+            reply_part['value'] = bytestring[4]
+        return reply_part
 
 
     def _interpret_sample(self, bytestring):
@@ -181,14 +181,14 @@ class SDS011:
         Translate a response packet from a sample request into
         a human-readable dictionary.
         """
-        reply = {
+        reply_part = {
             'type': 'sample',
             'value': {
                 'pm2.5': int.from_bytes(bytestring[2:4], 'little')/10,
                 'pm10.0': int.from_bytes(bytestring[4:6], 'little')/10
             }
         }
-        return reply
+        return reply_part
 
 
     def _send_command(self, command, write: bool, value: int):
@@ -212,12 +212,22 @@ class SDS011:
 
 
     def interpret(self, bytestring):
-        """Translate a raw device response into a dictionary."""
+        """Translate a raw device response into a dictionary.
+
+        Interpreted reply structure:
+        {   type: str,
+            set: bool,
+            value: int|{pm2.5: float, pm10.0: float},
+            id: bytes,
+            checksum: bool
+        }
+        """
         switch = {
             0xc5: lambda : self._interpret_property(bytestring),
             0xc0: lambda : self._interpret_sample(bytestring),
         }
         reply = switch[bytestring[1]]()
+        reply['set'] = bytestring[3]
         reply['id'] = bytestring[6:8]
         reply['checksum'] = bytestring[8] == sum(bytestring[2:8]) & 255
         return reply

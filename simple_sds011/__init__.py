@@ -28,10 +28,27 @@ _PARITY = serial.PARITY_NONE
 _STOPBITS = serial.STOPBITS_ONE
 
 
+class SensorError(Exception):
+    """Base class for exceptions in this module."""
+    def __init__(self, message):
+        self.__str__ = message
+
+
+class DeviceInactiveError(SensorError):
+    pass
+
+
+class ValueUnknownError(SensorError):
+    pass
+
+
 class SDS011:
-    def __init__(self, port=None, device_id=b'\xff\xff', read_timeout=1):
+    def __init__(self, port=None, read_timeout=1):
         self._sd = serial.Serial(port, timeout=read_timeout)
-        #self.device_id = device_id or b'\xff\xff'
+        self.info = {
+            'active': None, 'device_id': None, 'firmware': None,
+            'mode': None, 'period': None
+        }
 
 
     @property
@@ -41,8 +58,7 @@ class SDS011:
         Use this to sleep the device, preserving the life of
         the laser diode and fan.
         """
-        self._send_command(_CMD_WAKE_STATE, 0, 0)
-        return self._get_response()
+        return self._rw_property('active')
 
 
     @property
@@ -57,8 +73,7 @@ class SDS011:
     @property
     def firmware(self):
         """The device firmware byte string."""
-        self._send_command(_CMD_FIRMWARE, 0, 0)
-        return self._get_response()
+        return self._rw_property('firmware')
 
 
     @property
@@ -85,8 +100,7 @@ class SDS011:
         'query' in the spec sheet, but the 'active' term can be confused
         with an active device versus a sleeping device.
         """
-        self._send_command(_CMD_REPORT_MODE, 0, 0)
-        return self._get_response()
+        return self._rw_property('mode')
 
 
     @property
@@ -97,26 +111,22 @@ class SDS011:
         A work period is N * 60 - 30 seconds of sleeping, followed
         one 30-second sample interval.
         """
-        self._send_command(_CMD_WORK_PERIOD, 0, 0)
-        return self._get_response()
+        return self._rw_property('period')
 
 
     @active.setter
     def active(self, value: bool):
-        self._send_command(_CMD_WAKE_STATE, 1, value)
-        return self._get_response()
+        return self._rw_property('active', 1, value)
 
 
     @mode.setter
-    def mode(self, mode: bool):
-        self._send_command(_CMD_REPORT_MODE, 1, mode)
-        return self._get_response()
+    def mode(self, value: bool):
+        return self._rw_property('mode', 1, value)
 
 
     @period.setter
-    def period(self, minutes: int):
-        self._send_command(_CMD_WORK_PERIOD, 1, minutes)
-        return self._get_response()
+    def period(self, value: int):
+        return self._rw_property('period', 1, value)
 
 
     def _calc_payload_checksum(self, payload):
@@ -143,8 +153,49 @@ class SDS011:
         return payload
 
 
+    def _rw_property(self, p, p_set=0, p_value=0):
+        p_switch = {
+            'active': _CMD_WAKE_STATE,
+            'firmware': _CMD_FIRMWARE,
+            'mode': _CMD_REPORT_MODE,
+            'period': _CMD_WORK_PERIOD
+        }
+        if self.info[p] is not None and not p_set:
+            # If read request and value stored, return it from memory.
+            return {
+                'type': p,
+                'set': 0,
+                'value': self.info[p],
+                'id': self.device_id,
+                'checksum': True
+            }
+        else:
+            # If write request or value not in memory, go to device;
+            # and set the stored value along the way.
+            try:
+                self._send_command(p_switch[p], p_set, p_value)
+                response = self._get_response()
+                if response['checksum'] is not True:
+                    msg = 'Device response checksum does not match.'
+                    raise ValueUnknownError(msg)
+                self.info[p] = response['value']
+                return response
+            except serial.serialutil.SerialException:
+                raise  # Not connected or other serial error.
+            except IndexError:
+                if p_set:
+                    msg = 'Device inactive and unable to set value.'
+                    raise DeviceInactiveError(msg) from None
+                else:
+                    msg = 'Device inactive and value not stored.'
+                    raise ValueUnknownError(msg) from None
+
+
     def _get_response(self, interpret=True):
-        """Read a 10-byte response from the device."""
+        """Read a 10-byte response from the device.
+
+        Return an interpreted dict by default, raw bytes otherwise.
+        """
         response = self._sd.read(10)
         if interpret:
             response = self.interpret(response)
@@ -152,7 +203,7 @@ class SDS011:
 
 
     def _interpret_property(self, bytestring):
-        """interpret() sub-function: property replies.
+        """interpret() sub-function: property responses.
 
         Translate a response packet from property get/set into
         a human-readable dictionary.
@@ -176,7 +227,7 @@ class SDS011:
 
 
     def _interpret_sample(self, bytestring):
-        """interpret() sub-function: sample replies.
+        """interpret() sub-function: sample responses.
 
         Translate a response packet from a sample request into
         a human-readable dictionary.

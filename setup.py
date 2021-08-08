@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 setuptools.setup(
     name="simple-sds011",
     author="Brian Frick",
-    version="0.0.6",
+    version="0.0.7",
     description="A minimal library for SDS011 particulate sensors.",
     long_description=long_description,
     long_description_content_type="text/markdown",

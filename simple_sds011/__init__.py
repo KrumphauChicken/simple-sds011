@@ -60,7 +60,7 @@ class SDS011:
         is_zero_to_thirty = lambda x : x >= 0 and x <= 30 and x%1 == 0
         is_two_bytes = lambda x : type(x) is bytes and len(x) == 2
         props_checks = {
-            'active': is_zero_to_one, 'device_id': is_two_bytes,
+            'active': is_zero_to_one, #'device_id': is_two_bytes,
             'mode': is_zero_to_one, 'period': is_zero_to_thirty,
         }
 

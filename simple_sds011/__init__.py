@@ -50,6 +50,28 @@ class SDS011:
             'mode': None, 'period': None
         }
 
+    def set_up(self, **kwargs):
+        """Set up device and instance properties with initial values.
+
+        Assign settings on the device from user values, or get current
+        values from the device where/when user values are not supplied.
+        """
+        is_zero_to_one = lambda x : x in {0,1}
+        is_zero_to_thirty = lambda x : x >= 0 and x <= 30 and x%1 == 0
+        is_two_bytes = lambda x : type(x) is bytes and len(x) == 2
+        props_checks = {
+            'active': is_zero_to_one, 'device_id': is_two_bytes,
+            'mode': is_zero_to_one, 'period': is_zero_to_thirty,
+        }
+
+        for key,check in props_checks.items():
+            value = kwargs.get(key,-1)
+            if check(value):
+                self._rw_property(key,1,value)
+            else:
+                self._rw_property(key)
+        self._rw_property('firmware')
+
 
     @property
     def active(self):
